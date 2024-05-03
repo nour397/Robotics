@@ -293,4 +293,4 @@ class PoppyEnv(gym.Env):
 
         end_effector_indices = [13, 16]
 
-        return target_positions[:, end_effector_indices], target_positions  
+        return target_positions[:, end_effector_indices], target_positions
