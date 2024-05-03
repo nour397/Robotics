@@ -1,11 +1,8 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-import time
 import gym
 import numpy as np
 from gym import spaces
 from tqdm import tqdm
+
 import numpy as np
 from utils.skeleton import *
 from utils.quaternion import *
@@ -17,167 +14,120 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 from pypot.primitive.move import Move
 from pypot.primitive.move import MovePlayer
 
-
-
+from pypot import vrep
 
 class PoppyEnv(gym.Env):
 
     def __init__(self, goals=2, terminates=True):
        
-        #print("Hello, I am Poppy!")
-        
-        from pypot import vrep
+        print("Hello, I am Poppy!")
         vrep.close_all_connections()
         self.poppy = PoppyTorso(simulator='vrep')
         
-        #self.n_goals = goals
         self.current_step =0
         self.num_steps = 0
-        self.target_loaded = False 
-        self.infos = []
-        
-        #modif jdida
-        if not self.target_loaded:
-            self.get_target()
-            self.target_loaded = True
-            self.num_steps = len(self.targets)  # Make sure this matches the expected number of steps
-
-
-        #self.terminates = terminates
+        self.target_loaded = False
 
         self.done = False
-        #self.is_initialized = False
+        self.infos=[]
       
-        #self.goal = None
-        #self.goal_positions = []
-        #self.goal_distances = []
         
         self.episodes = 0  # used for resetting the sim every so often
         self.restart_every_n_episodes = 1000
         
-      
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32)  #
+        self.observation_space = spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32)  # 6 joints
         
-        self.action_space = spaces.Box(low=0, high=180, shape=(2,), dtype=np.float32)  #
+        self.action_space = spaces.Box(low=np.array([0,-180]), high=np.array([180,0]), shape=(2,), dtype=np.float32)  # 2 actions
 
         super().__init__()
         
-      
-    
     def seed(self, seed=None):
         return [np.random.seed(seed)]
     
+    def calculate_reward(self, dis):
+        # Dense reward component: exponential decay based on distance
+        dense_reward = np.exp(-10 * dis)
 
+        if dis <= 0.3:
+            # Sparse reward increases as distance decreases from 0.3 to 0, max at 0
+            sparse_reward = (0.3 - dis) / 0.3  # This ensures the reward is 1 when dis is 0 and 0 when dis is 0.3
+        else:
+            sparse_reward = 0.0
+
+
+        # Combine both rewards
+        total_reward = dense_reward + sparse_reward
+        return total_reward
+    
     def step(self, action):
         
-        obs = self.get_obs() 
         action_l = action[0]
         action_r = action[1]
-    
-        for k, m in enumerate(self.poppy.l_arm_chain.motors):
-            if m.name == 'l_shoulder_x':   
-                m.goto_position(action_l, 0.01, wait=True)
-            elif m.name == 'l_elbow_y':
-                m.goto_position(90.0, 0.01, wait=True)
-            else:
-                m.goto_position(0.0, 0.01, wait=True)
-                
-        for k, m in enumerate(self.poppy.r_arm_chain.motors):
-            if m.name == 'r_shoulder_x':   
-                m.goto_position(-action_r, 0.01, wait=True)
-            elif m.name == 'r_elbow_y':
-                m.goto_position(90.0, 0.01, wait=True)
-            else:
-                m.goto_position(0.0, 0.01, wait=True)             
-
-        obs = self.get_obs()
-
-        # Ensure that current_step does not exceed the length of targets
-        if self.current_step >= len(self.targets):
-            self.current_step = 0
-
-        # Access the target with the current_step index
-        dis = np.linalg.norm(obs - np.array(self.targets[self.current_step].flatten()))
-        reward = np.exp(-5*dis)
-        self.current_step += 1  
         
-        info = {'reward': reward, 'l': self.current_step}
+        if self.current_step > 125 :  
+                        
+            for k,m in enumerate(self.poppy.r_arm_chain.motors):
+                            
+                            if (m.name != 'r_elbow_y'):   
+                                   m.goto_position(0.0, 1, wait= True)
+                            else:
+                                   m.goto_position(90.0,1, wait=True)
+                                
+            for k,m in enumerate(self.poppy.l_arm_chain.motors):
+                if (m.name == 'l_shoulder_x') :   
+                            m.goto_position(action_l, 1, wait= True)
+                            
+                elif (m.name == 'l_elbow_y') :
+                            m.goto_position(90.0, 1, wait= True)
+                else: 
+                            m.goto_position(0.0, 1, wait= True)                
+
+        else:     
+            for k,m in enumerate(self.poppy.r_arm_chain.motors):
+                if (m.name == 'r_shoulder_x') :   
+                            m.goto_position(action_r, 1, wait= True)
+                            
+                elif (m.name == 'r_elbow_y') :
+                            m.goto_position(90.0, 1, wait= True)
+                else: 
+                            m.goto_position(0.0, 1, wait= True)     
+                    
+            for k,m in enumerate(self.poppy.l_arm_chain.motors):
+                            
+                            if (m.name != 'l_elbow_y'):   
+                                   m.goto_position(0.0, 1, wait= True)
+                            else:
+                                   m.goto_position(90.0,1, wait=True)
+            
+        obs = self.get_obs() 
+        
+        if self.current_step <=125 :        
+             dis = np.linalg.norm(obs[3:] - np.array(self.targets[self.current_step].flatten())[3:])
+        else:
+             dis = np.linalg.norm(obs[0:3] - np.array(self.targets[self.current_step].flatten())[0:3])       
         
 
-        self.done = (self.current_step == self.num_steps)
+        reward = self.calculate_reward(dis)
+            
+        self.current_step += 5
+            
+        print("reward : ", reward)
+        print("current step : ", self.current_step)
+               
+        info={'episode':self.episodes, 'step':self.current_step, 'reward':reward}
+        self.infos.append(info)
+        
+        self.done = (self.current_step >=self.num_steps)
         
         if self.done:
             self.episodes += 1
-            self.current_step = 0
-
-        return np.float32(obs), reward, self.done, info
-
-        # '''        
-        # obs = self.get_obs() 
-        # print(obs)
-        # state = self.get_state()
-        # print(state)
-        # '''
-
-        # #print(f"action: {action}")
-        # action_l = action[0]
-        # action_r = action[1]
         
-        # for k,m in enumerate(self.poppy.l_arm_chain.motors):
-
-        #     if m.name == 'l_shoulder_x':   
-        #         m.goto_position(action_l, 0.01, wait= True)
-        #     elif m.name == 'l_elbow_y':
-        #         m.goto_position(90.0, 0.01, wait= True)
-        #     else:
-        #         m.goto_position(0.0, 0.01, wait= True)
-                    
-        # for k,m in enumerate(self.poppy.r_arm_chain.motors):
-        #     if m.name == 'r_shoulder_x':   
-        #         m.goto_position(-action_r, 0.01, wait= True) # opposite of left !
-        #     elif m.name == 'r_elbow_y':
-        #         m.goto_position(90.0, 0.01, wait= True)
-        #     else:
-        #         m.goto_position(0.0, 0.01, wait= True)             
-                    
-                    
-        
-        # obs = self.get_obs() 
-        
-        
-        # # corrected version
-        # if self.current_step >= len(self.targets):  # Check if current_step has exceeded or reached the length of targets
-        #     self.current_step = 0  # Reset current_step to 0 or handle it according to your scenario requirements
-
-        # # Now safely access the target with adjusted current_step
-        # dis = np.linalg.norm(obs - np.array(self.targets[self.current_step].flatten()))
-
-
-        
-        # # dis = np.linalg.norm(obs - np.array(self.targets[self.current_step - 1].flatten())) 
-    
-        # reward = np.exp(-5*dis)
-        # self.current_step += 1
-
-        # #print("current step : ", self.current_step)
-        # #print("reward : ", reward)
-        # info={'episode':self.episodes, 'step':self.current_step, 'reward':reward}
-        # self.infos.append(info)
-        # self.current_step += 1
-        
-        # self.done = (self.current_step==self.num_steps)
-        
-        # if self.done:
-        #     self.episodes += 1
-        #     self.current_step = 0
-        
-        # #print("episode : ", self.episodes)
+        print("episode : ", self.episodes)
             
-        # info={}
+        
+        info={}
 
-        # return np.float32(obs), reward, self.done,info
-        
-        
+        return np.float32(obs), reward, self.done,info
     
     def reset(self):
         joint_pos = { 'l_elbow_y':90.0,
@@ -196,42 +146,23 @@ class PoppyEnv(gym.Env):
                     }
         
         for m in self.poppy.motors:
-               m.goto_position(joint_pos[m.name], 0.01, wait= True)
+               m.goto_position(joint_pos[m.name], 1, wait= True)
         
         
         self.current_step =0
         self.done = False
         
-        #newly added
-        if not self.target_loaded:
+        if self.target_loaded == False :
             self.get_target()
-            self.target_loaded = True
-        self.num_steps = len(self.targets)
-        obs = self.get_obs()
-        return np.float32(obs)
-        
-        # if self.target_loaded == False :
-        #     self.get_target()
-        #     self.target_loaded =True
+            self.target_loaded =True
             
-        # self.num_steps = self.targets.shape[0]
-        # obs = np.r_[self.poppy.l_arm_chain.position, self.poppy.r_arm_chain.position]
+        self.num_steps = self.targets.shape[0]
+        obs = np.r_[self.poppy.l_arm_chain.position, self.poppy.r_arm_chain.position]
         
-        # return np.float32(obs)
-    
-    
-    
-                
+        return np.float32(obs)
+
     def get_obs(self):        
         return np.r_[self.poppy.l_arm_chain.position, self.poppy.r_arm_chain.position]
-
-    
-    def get_state(self):        
-        return self.poppy.l_arm_chain.joints_position, self.poppy.r_arm_chain.joints_position
-    
-#     def get_reward(self):
-#         return 0
-    
        
     def moving_average(self,a, n=3) :
         repeat_shape = list(a.shape)
@@ -264,12 +195,8 @@ class PoppyEnv(gym.Env):
     
     
     def get_target(self):
-        self.skeletons = torch.load(f = "mai1.pt") # located in the poppy-torso-track dir   
-        # sample only a fraction of the skeletons
-        idx = np.arange(0, len(self.skeletons), 25)
-        print(f"len idx : {len(idx)}, len skeletons: {len(self.skeletons)}, idx {idx}]")
-        self.skeletons = self.skeletons[idx]
-
+        
+        self.skeletons = blazepose_skeletons('mai1.mov')        
         self.topology = [0, 0, 1, 2, 0, 4, 5, 0, 7, 8, 9, 8, 11, 12, 8, 14, 15]        
         self.poppy_lengths = torch.Tensor([
                             0.0,
@@ -298,7 +225,6 @@ class PoppyEnv(gym.Env):
         smoothed_targets = self.moving_average(interpolated_targets, n=15)
         
         self.targets = smoothed_targets
-        self.all_positions = all_positions
         
         
         
@@ -365,42 +291,6 @@ class PoppyEnv(gym.Env):
             quaternions
         )[0]
 
-
-
-        # Return only target positions for the end-effector of the 6 kinematic chains:
-        # Chest, head, left hand, left elbow, left shoulder, right hand, right elbow
-        # end_effector_indices = [8, 10, 13, 12, 11, 16, 15]
         end_effector_indices = [13, 16]
-        # end_effector_indices = [13, 12, 16, 15]
 
         return target_positions[:, end_effector_indices], target_positions  
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-    
