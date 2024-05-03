@@ -20,7 +20,6 @@ class PoppyEnv(gym.Env):
 
     def __init__(self, goals=2, terminates=True):
        
-        print("Hello, I am Poppy!")
         vrep.close_all_connections()
         self.poppy = PoppyTorso(simulator='vrep')
         
@@ -218,7 +217,7 @@ class PoppyEnv(gym.Env):
                             0.13
                             ])
         
-        targets, all_positions = self.targets_from_skeleton(self.skeletons, self.topology,self.poppy_lengths)
+        targets, _ = self.targets_from_skeleton(self.skeletons, self.topology,self.poppy_lengths)
         
         interpolated_targets = self.interpolate_targets(targets)
         
